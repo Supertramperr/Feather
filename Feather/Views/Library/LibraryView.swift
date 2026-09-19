@@ -8,18 +8,54 @@
 import SwiftUI
 import CoreData
 import NimbleViews
+import UIKit
+
+enum LibraryMode {
+	case imported
+	case signed
+	
+	var title: String {
+		switch self {
+		case .imported: return .localized("Imported")
+		case .signed: return .localized("Signed")
+		}
+	}
+	
+	var emptyIcon: String {
+		switch self {
+		case .imported: return "tray.and.arrow.down.fill"
+		case .signed: return "checkmark.seal.fill"
+		}
+	}
+}
+
+struct ImportedView: View {
+	var body: some View {
+		LibraryView(mode: .imported)
+	}
+}
+
+struct SignedView: View {
+	var body: some View {
+		LibraryView(mode: .signed)
+	}
+}
 
 // MARK: - View
 struct LibraryView: View {
+	let mode: LibraryMode
+	
 	@StateObject var downloadManager = DownloadManager.shared
 	@StateObject var updateManager = UpdateManager.shared
+	
+	@AppStorage("Feather.showURLImportAction") private var _showURLImportAction = true
 	
 	@State private var _selectedInfoAppPresenting: AnyApp?
 	@State private var _selectedSigningAppPresenting: AnyApp?
 	@State private var _selectedInstallAppPresenting: AnyApp?
 	@State private var _isImportingPresenting = false
 	@State private var _isDownloadingPresenting = false
-	@State private var _alertDownloadString: String = "" // for _isDownloadingPresenting
+	@State private var _alertDownloadString: String = ""
 	@State private var _updateCheckRotation = 0.0
 	@State private var _isUpdateCheckCompleteVisible = false
 	
@@ -28,16 +64,15 @@ struct LibraryView: View {
 	@State private var _editMode: EditMode = .inactive
 	
 	@State private var _searchText = ""
-	@State private var _selectedScope: Scope = .all
-	
 	
 	@Namespace private var _namespace
 	
-	// horror
 	private func filteredAndSortedApps<T>(from apps: FetchedResults<T>) -> [T] where T: NSManagedObject {
 		apps.filter {
 			_searchText.isEmpty ||
-				(($0.value(forKey: "name") as? String)?.localizedCaseInsensitiveContains(_searchText) ?? false)
+				(($0.value(forKey: "name") as? String)?.localizedCaseInsensitiveContains(_searchText) ?? false) ||
+				(($0.value(forKey: "identifier") as? String)?.localizedCaseInsensitiveContains(_searchText) ?? false) ||
+				(($0.value(forKey: "version") as? String)?.localizedCaseInsensitiveContains(_searchText) ?? false)
 		}
 	}
 	
@@ -47,6 +82,25 @@ struct LibraryView: View {
 	
 	private var _filteredImportedApps: [Imported] {
 		filteredAndSortedApps(from: _importedApps)
+	}
+	
+	private var _isCurrentListEmpty: Bool {
+		switch mode {
+		case .imported: return _filteredImportedApps.isEmpty
+		case .signed: return _filteredSignedApps.isEmpty
+		}
+	}
+	
+	private var _clipboardURLString: String? {
+		guard
+			let value = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+			let url = URL(string: value),
+			let scheme = url.scheme?.lowercased(),
+			["http", "https"].contains(scheme)
+		else {
+			return nil
+		}
+		return value
 	}
 	
 	// MARK: Fetch
@@ -70,72 +124,60 @@ struct LibraryView: View {
 	
 	// MARK: Body
 	var body: some View {
-		NBNavigationView(.localized("Library")) {
+		NBNavigationView(mode.title) {
 			NBListAdaptable {
-				if
-					!_filteredSignedApps.isEmpty,
-					_selectedScope == .all || _selectedScope == .signed
-				{
-					NBSection(
-						.localized("Signed"),
-						secondary: _filteredSignedApps.count.description
-					) {
-						ForEach(_filteredSignedApps, id: \.uuid) { app in
-							LibraryCellView(
-								app: app,
-								selectedInfoAppPresenting: $_selectedInfoAppPresenting,
-								selectedSigningAppPresenting: $_selectedSigningAppPresenting,
-								selectedInstallAppPresenting: $_selectedInstallAppPresenting,
-								selectedAppUUIDs: $_selectedAppUUIDs
-							)
-							.compatMatchedTransitionSource(id: app.uuid ?? "", ns: _namespace)
+				switch mode {
+				case .signed:
+					if !_filteredSignedApps.isEmpty {
+						NBSection(
+							.localized("Signed"),
+							secondary: _filteredSignedApps.count.description
+						) {
+							ForEach(_filteredSignedApps, id: \.uuid) { app in
+								_libraryCell(for: app)
+							}
 						}
 					}
-				}
-				
-				if
-					!_filteredImportedApps.isEmpty,
-					_selectedScope == .all || _selectedScope == .imported
-				{
-					NBSection(
-						.localized("Imported"),
-						secondary: _filteredImportedApps.count.description
-					) {
-						ForEach(_filteredImportedApps, id: \.uuid) { app in
-							LibraryCellView(
-								app: app,
-								selectedInfoAppPresenting: $_selectedInfoAppPresenting,
-								selectedSigningAppPresenting: $_selectedSigningAppPresenting,
-								selectedInstallAppPresenting: $_selectedInstallAppPresenting,
-								selectedAppUUIDs: $_selectedAppUUIDs
-							)
-							.compatMatchedTransitionSource(id: app.uuid ?? "", ns: _namespace)
+				case .imported:
+					if !_filteredImportedApps.isEmpty {
+						NBSection(
+							.localized("Imported"),
+							secondary: _filteredImportedApps.count.description
+						) {
+							ForEach(_filteredImportedApps, id: \.uuid) { app in
+								_libraryCell(for: app)
+							}
 						}
 					}
 				}
 			}
 			.searchable(text: $_searchText, placement: .platform())
-			.compatSearchScopes($_selectedScope) {
-				ForEach(Scope.allCases, id: \.displayName) { scope in
-					Text(scope.displayName).tag(scope)
-				}
-			}
 			.scrollDismissesKeyboard(.interactively)
 			.overlay {
-				if
-					_filteredSignedApps.isEmpty,
-					_filteredImportedApps.isEmpty
-				{
+				if _isCurrentListEmpty {
 					if #available(iOS 17, *) {
 						ContentUnavailableView {
-							Label(.localized("No Apps"), systemImage: "questionmark.app.fill")
+							Label(
+								_searchText.isEmpty ? mode.title : .localized("No Results"),
+								systemImage: mode.emptyIcon
+							)
 						} description: {
-							Text(.localized("Get started by importing your first IPA file."))
+							if _searchText.isEmpty {
+								switch mode {
+								case .imported:
+									Text(.localized("Get started by importing your first IPA file."))
+								case .signed:
+									Text("Signed apps will appear here after signing.")
+								}
+							} else {
+								Text("No apps match your search.")
+							}
 						} actions: {
-							Menu {
-								_importActions()
-							} label: {
-								NBButton(.localized("Import"), style: .text)
+							if mode == .imported && _searchText.isEmpty {
+								Button(.localized("Import from Files")) {
+									_isImportingPresenting = true
+								}
+								.buttonStyle(.borderedProminent)
 							}
 						}
 					}
@@ -174,12 +216,10 @@ struct LibraryView: View {
 						.accessibilityLabel(.localized("Check for Updates"))
 					}
 					
-					NBToolbarMenu(
-						systemImage: "plus",
-						style: .icon,
-						placement: .topBarTrailing
-					) {
-						_importActions()
+					if mode == .imported {
+						ToolbarItem(placement: .topBarTrailing) {
+							_importMenu()
+						}
 					}
 				}
 			}
@@ -198,7 +238,7 @@ struct LibraryView: View {
 			}
 			.sheet(isPresented: $_isImportingPresenting) {
 				FileImporterRepresentableView(
-					allowedContentTypes:  [.ipa, .tipa],
+					allowedContentTypes: [.ipa, .tipa],
 					allowsMultipleSelection: true,
 					onDocumentsPicked: { urls in
 						guard !urls.isEmpty else { return }
@@ -225,6 +265,7 @@ struct LibraryView: View {
 				}
 			}
 			.onReceive(NotificationCenter.default.publisher(for: Notification.Name("Feather.installApp"))) { _ in
+				guard _selectedSigningAppPresenting != nil else { return }
 				if let latest = _signedApps.first {
 					_selectedInstallAppPresenting = AnyApp(base: latest)
 				}
@@ -244,20 +285,56 @@ struct LibraryView: View {
 // MARK: - Extension: View
 extension LibraryView {
 	@ViewBuilder
-	private func _importActions() -> some View {
-		Button(.localized("Import from Files"), systemImage: "folder") {
+	private func _libraryCell<T: AppInfoPresentable>(for app: T) -> some View {
+		LibraryCellView(
+			app: app,
+			selectedInfoAppPresenting: $_selectedInfoAppPresenting,
+			selectedSigningAppPresenting: $_selectedSigningAppPresenting,
+			selectedInstallAppPresenting: $_selectedInstallAppPresenting,
+			selectedAppUUIDs: $_selectedAppUUIDs
+		)
+		.compatMatchedTransitionSource(id: app.uuid ?? "", ns: _namespace)
+	}
+	
+	@ViewBuilder
+	private func _importMenu() -> some View {
+		Menu {
+			Button(.localized("Import from Files"), systemImage: "folder") {
+				_isImportingPresenting = true
+			}
+			
+			if _showURLImportAction {
+				Button(.localized("Import from URL"), systemImage: "globe") {
+					_isDownloadingPresenting = true
+				}
+				
+				Button("Paste URL", systemImage: "doc.on.clipboard") {
+					guard
+						let string = _clipboardURLString,
+						let url = URL(string: string)
+					else {
+						return
+					}
+					_ = downloadManager.startDownload(
+						from: url,
+						id: "FeatherManualDownload_\(UUID().uuidString)"
+					)
+				}
+				.disabled(_clipboardURLString == nil)
+			}
+		} label: {
+			Image(systemName: "plus")
+		} primaryAction: {
 			_isImportingPresenting = true
 		}
-		Button(.localized("Import from URL"), systemImage: "globe") {
-			_isDownloadingPresenting = true
-		}
+		.accessibilityLabel(.localized("Import from Files"))
 	}
 }
 
 // MARK: - Extension: Bulk Delete
 extension LibraryView {
 	private func _bulkDeleteSelectedApps() {
-		let selectedApps = _getAllApps().filter { app in
+		let selectedApps = _getVisibleApps().filter { app in
 			guard let uuid = app.uuid else { return false }
 			return _selectedAppUUIDs.contains(uuid)
 		}
@@ -267,22 +344,15 @@ extension LibraryView {
 		}
 		
 		_selectedAppUUIDs.removeAll()
-		
-		// _editMode = .inactive
 	}
 	
-	private func _getAllApps() -> [AppInfoPresentable] {
-		var allApps: [AppInfoPresentable] = []
-		
-		if _selectedScope == .all || _selectedScope == .signed {
-			allApps.append(contentsOf: _filteredSignedApps)
+	private func _getVisibleApps() -> [AppInfoPresentable] {
+		switch mode {
+		case .signed:
+			return _filteredSignedApps.map { $0 as AppInfoPresentable }
+		case .imported:
+			return _filteredImportedApps.map { $0 as AppInfoPresentable }
 		}
-		
-		if _selectedScope == .all || _selectedScope == .imported {
-			allApps.append(contentsOf: _filteredImportedApps)
-		}
-		
-		return allApps
 	}
 	
 	private func _checkForUpdates() async {
@@ -311,23 +381,6 @@ extension LibraryView {
 				if !updateManager.isChecking {
 					_isUpdateCheckCompleteVisible = false
 				}
-			}
-		}
-	}
-}
-
-// MARK: - Extension: View (Sort)
-extension LibraryView {
-	enum Scope: CaseIterable {
-		case all
-		case signed
-		case imported
-		
-		var displayName: String {
-			switch self {
-			case .all: return .localized("All")
-			case .signed: return .localized("Signed")
-			case .imported: return .localized("Imported")
 			}
 		}
 	}
