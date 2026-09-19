@@ -1,0 +1,29 @@
+name: UX Build
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: 'true'
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.3.0.app
+
+      - name: Build iOS IPA
+        run: make iphoneos
+
+      - name: Upload Feather IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Feather-UX
+          path: packages/Feather.ipa
+          if-no-files-found: error
