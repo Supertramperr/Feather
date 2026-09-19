@@ -1,0 +1,40 @@
+name: UX Build
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ux-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          submodules: 'true'
+
+      - name: Show Xcode
+        run: |
+          xcode-select -p
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Build iOS IPA
+        run: |
+          if ! make iphoneos; then
+            echo "Initial xcodebuild failed during package resolution; retrying with the resolved package cache..."
+            make iphoneos
+          fi
+
+      - name: Upload Feather IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Feather-UX
+          path: packages/Feather.ipa
+          if-no-files-found: error

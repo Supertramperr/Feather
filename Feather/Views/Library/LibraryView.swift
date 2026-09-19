@@ -11,15 +11,30 @@ import NimbleViews
 
 // MARK: - View
 struct LibraryView: View {
+	enum Mode: Equatable {
+		case imported
+		case signed
+		
+		var title: String {
+			switch self {
+			case .imported: return .localized("Imported")
+			case .signed: return .localized("Signed")
+			}
+		}
+	}
+	
+	let mode: Mode
+	
 	@StateObject var downloadManager = DownloadManager.shared
 	@StateObject var updateManager = UpdateManager.shared
+	@AppStorage("Feather.showURLImportButton") private var _showURLImportButton = false
 	
 	@State private var _selectedInfoAppPresenting: AnyApp?
 	@State private var _selectedSigningAppPresenting: AnyApp?
 	@State private var _selectedInstallAppPresenting: AnyApp?
 	@State private var _isImportingPresenting = false
 	@State private var _isDownloadingPresenting = false
-	@State private var _alertDownloadString: String = "" // for _isDownloadingPresenting
+	@State private var _alertDownloadString: String = ""
 	@State private var _updateCheckRotation = 0.0
 	@State private var _isUpdateCheckCompleteVisible = false
 	
@@ -28,12 +43,9 @@ struct LibraryView: View {
 	@State private var _editMode: EditMode = .inactive
 	
 	@State private var _searchText = ""
-	@State private var _selectedScope: Scope = .all
-	
 	
 	@Namespace private var _namespace
 	
-	// horror
 	private func filteredAndSortedApps<T>(from apps: FetchedResults<T>) -> [T] where T: NSManagedObject {
 		apps.filter {
 			_searchText.isEmpty ||
@@ -47,6 +59,15 @@ struct LibraryView: View {
 	
 	private var _filteredImportedApps: [Imported] {
 		filteredAndSortedApps(from: _importedApps)
+	}
+	
+	private var _currentListIsEmpty: Bool {
+		switch mode {
+		case .imported:
+			return _filteredImportedApps.isEmpty
+		case .signed:
+			return _filteredSignedApps.isEmpty
+		}
 	}
 	
 	// MARK: Fetch
@@ -70,72 +91,56 @@ struct LibraryView: View {
 	
 	// MARK: Body
 	var body: some View {
-		NBNavigationView(.localized("Library")) {
+		NBNavigationView(mode.title) {
 			NBListAdaptable {
-				if
-					!_filteredSignedApps.isEmpty,
-					_selectedScope == .all || _selectedScope == .signed
-				{
-					NBSection(
-						.localized("Signed"),
-						secondary: _filteredSignedApps.count.description
-					) {
-						ForEach(_filteredSignedApps, id: \.uuid) { app in
-							LibraryCellView(
-								app: app,
-								selectedInfoAppPresenting: $_selectedInfoAppPresenting,
-								selectedSigningAppPresenting: $_selectedSigningAppPresenting,
-								selectedInstallAppPresenting: $_selectedInstallAppPresenting,
-								selectedAppUUIDs: $_selectedAppUUIDs
-							)
-							.compatMatchedTransitionSource(id: app.uuid ?? "", ns: _namespace)
-						}
+				switch mode {
+				case .imported:
+					ForEach(_filteredImportedApps, id: \.uuid) { app in
+						LibraryCellView(
+							app: app,
+							selectedInfoAppPresenting: $_selectedInfoAppPresenting,
+							selectedSigningAppPresenting: $_selectedSigningAppPresenting,
+							selectedInstallAppPresenting: $_selectedInstallAppPresenting,
+							selectedAppUUIDs: $_selectedAppUUIDs
+						)
+						.compatMatchedTransitionSource(id: app.uuid ?? "", ns: _namespace)
 					}
-				}
-				
-				if
-					!_filteredImportedApps.isEmpty,
-					_selectedScope == .all || _selectedScope == .imported
-				{
-					NBSection(
-						.localized("Imported"),
-						secondary: _filteredImportedApps.count.description
-					) {
-						ForEach(_filteredImportedApps, id: \.uuid) { app in
-							LibraryCellView(
-								app: app,
-								selectedInfoAppPresenting: $_selectedInfoAppPresenting,
-								selectedSigningAppPresenting: $_selectedSigningAppPresenting,
-								selectedInstallAppPresenting: $_selectedInstallAppPresenting,
-								selectedAppUUIDs: $_selectedAppUUIDs
-							)
-							.compatMatchedTransitionSource(id: app.uuid ?? "", ns: _namespace)
-						}
+				case .signed:
+					ForEach(_filteredSignedApps, id: \.uuid) { app in
+						LibraryCellView(
+							app: app,
+							selectedInfoAppPresenting: $_selectedInfoAppPresenting,
+							selectedSigningAppPresenting: $_selectedSigningAppPresenting,
+							selectedInstallAppPresenting: $_selectedInstallAppPresenting,
+							selectedAppUUIDs: $_selectedAppUUIDs
+						)
+						.compatMatchedTransitionSource(id: app.uuid ?? "", ns: _namespace)
 					}
 				}
 			}
 			.searchable(text: $_searchText, placement: .platform())
-			.compatSearchScopes($_selectedScope) {
-				ForEach(Scope.allCases, id: \.displayName) { scope in
-					Text(scope.displayName).tag(scope)
-				}
-			}
 			.scrollDismissesKeyboard(.interactively)
 			.overlay {
-				if
-					_filteredSignedApps.isEmpty,
-					_filteredImportedApps.isEmpty
-				{
+				if _currentListIsEmpty {
 					if #available(iOS 17, *) {
 						ContentUnavailableView {
-							Label(.localized("No Apps"), systemImage: "questionmark.app.fill")
+							Label(
+								mode == .imported ? .localized("No Imported Apps") : .localized("No Signed Apps"),
+								systemImage: mode == .imported ? "tray.and.arrow.down" : "checkmark.seal"
+							)
 						} description: {
-							Text(.localized("Get started by importing your first IPA file."))
+							Text(
+								mode == .imported
+									? .localized("Get started by importing your first IPA file.")
+									: .localized("Signed apps will appear here after signing.")
+							)
 						} actions: {
-							Menu {
-								_importActions()
-							} label: {
-								NBButton(.localized("Import"), style: .text)
+							if mode == .imported {
+								Button {
+									_isImportingPresenting = true
+								} label: {
+									NBButton(.localized("Import from Files"), style: .text)
+								}
 							}
 						}
 					}
@@ -155,31 +160,49 @@ struct LibraryView: View {
 						_bulkDeleteSelectedApps()
 					}
 				} else {
-					ToolbarItem(placement: .topBarTrailing) {
-						Button {
-							Task {
-								await _checkForUpdates()
+					if mode == .signed {
+						ToolbarItem(placement: .topBarTrailing) {
+							Button {
+								Task {
+									await _checkForUpdates()
+								}
+							} label: {
+								Image(systemName: _isUpdateCheckCompleteVisible ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath")
+									.rotationEffect(.degrees(_updateCheckRotation))
+									.animation(
+										updateManager.isChecking
+											? .linear(duration: 0.8).repeatForever(autoreverses: false)
+											: .default,
+										value: _updateCheckRotation
+									)
 							}
-						} label: {
-							Image(systemName: _isUpdateCheckCompleteVisible ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath")
-								.rotationEffect(.degrees(_updateCheckRotation))
-								.animation(
-									updateManager.isChecking
-										? .linear(duration: 0.8).repeatForever(autoreverses: false)
-										: .default,
-									value: _updateCheckRotation
-								)
+							.disabled(updateManager.isChecking)
+							.accessibilityLabel(.localized("Check for Updates"))
 						}
-						.disabled(updateManager.isChecking)
-						.accessibilityLabel(.localized("Check for Updates"))
 					}
 					
-					NBToolbarMenu(
-						systemImage: "plus",
-						style: .icon,
-						placement: .topBarTrailing
-					) {
-						_importActions()
+					if mode == .imported {
+						if _showURLImportButton {
+							ToolbarItem(placement: .topBarTrailing) {
+								Button {
+									_isDownloadingPresenting = true
+								} label: {
+									Image(systemName: "link")
+								}
+								.accessibilityLabel(.localized("Import from URL"))
+							}
+						}
+						
+						ToolbarItem(placement: .topBarTrailing) {
+							Menu {
+								_importActions()
+							} label: {
+								Image(systemName: "plus")
+							} primaryAction: {
+								_isImportingPresenting = true
+							}
+							.accessibilityLabel(.localized("Import from Files"))
+						}
 					}
 				}
 			}
@@ -198,7 +221,7 @@ struct LibraryView: View {
 			}
 			.sheet(isPresented: $_isImportingPresenting) {
 				FileImporterRepresentableView(
-					allowedContentTypes:  [.ipa, .tipa],
+					allowedContentTypes: [.ipa, .tipa],
 					allowsMultipleSelection: true,
 					onDocumentsPicked: { urls in
 						guard !urls.isEmpty else { return }
@@ -219,9 +242,7 @@ struct LibraryView: View {
 					_alertDownloadString = ""
 				}
 				Button(.localized("OK")) {
-					if let url = URL(string: _alertDownloadString) {
-						_ = downloadManager.startDownload(from: url, id: "FeatherManualDownload_\(UUID().uuidString)")
-					}
+					_startURLImport(_alertDownloadString)
 				}
 			}
 			.onReceive(NotificationCenter.default.publisher(for: Notification.Name("Feather.installApp"))) { _ in
@@ -241,7 +262,7 @@ struct LibraryView: View {
 	}
 }
 
-// MARK: - Extension: View
+// MARK: - Extension: Import
 extension LibraryView {
 	@ViewBuilder
 	private func _importActions() -> some View {
@@ -251,13 +272,31 @@ extension LibraryView {
 		Button(.localized("Import from URL"), systemImage: "globe") {
 			_isDownloadingPresenting = true
 		}
+		Button(.localized("Paste URL"), systemImage: "doc.on.clipboard") {
+			_importFromClipboard()
+		}
+	}
+	
+	private func _importFromClipboard() {
+		guard let value = UIPasteboard.general.string else { return }
+		_startURLImport(value)
+	}
+	
+	private func _startURLImport(_ value: String) {
+		let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !trimmed.isEmpty, let url = URL(string: trimmed) else { return }
+		_ = downloadManager.startDownload(
+			from: url,
+			id: "FeatherManualDownload_\(UUID().uuidString)"
+		)
+		_alertDownloadString = ""
 	}
 }
 
 // MARK: - Extension: Bulk Delete
 extension LibraryView {
 	private func _bulkDeleteSelectedApps() {
-		let selectedApps = _getAllApps().filter { app in
+		let selectedApps = _getCurrentApps().filter { app in
 			guard let uuid = app.uuid else { return false }
 			return _selectedAppUUIDs.contains(uuid)
 		}
@@ -267,22 +306,15 @@ extension LibraryView {
 		}
 		
 		_selectedAppUUIDs.removeAll()
-		
-		// _editMode = .inactive
 	}
 	
-	private func _getAllApps() -> [AppInfoPresentable] {
-		var allApps: [AppInfoPresentable] = []
-		
-		if _selectedScope == .all || _selectedScope == .signed {
-			allApps.append(contentsOf: _filteredSignedApps)
+	private func _getCurrentApps() -> [AppInfoPresentable] {
+		switch mode {
+		case .imported:
+			return _filteredImportedApps.map { $0 as AppInfoPresentable }
+		case .signed:
+			return _filteredSignedApps.map { $0 as AppInfoPresentable }
 		}
-		
-		if _selectedScope == .all || _selectedScope == .imported {
-			allApps.append(contentsOf: _filteredImportedApps)
-		}
-		
-		return allApps
 	}
 	
 	private func _checkForUpdates() async {
@@ -311,23 +343,6 @@ extension LibraryView {
 				if !updateManager.isChecking {
 					_isUpdateCheckCompleteVisible = false
 				}
-			}
-		}
-	}
-}
-
-// MARK: - Extension: View (Sort)
-extension LibraryView {
-	enum Scope: CaseIterable {
-		case all
-		case signed
-		case imported
-		
-		var displayName: String {
-			switch self {
-			case .all: return .localized("All")
-			case .signed: return .localized("Signed")
-			case .imported: return .localized("Imported")
 			}
 		}
 	}
