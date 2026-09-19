@@ -14,6 +14,7 @@ import IDeviceSwift
 // MARK: - View
 struct SettingsView: View {
 	@AppStorage("feather.selectedCert") private var _storedSelectedCert: Int = 0
+	@AppStorage("Feather.showURLImportAction") private var _showURLImportAction = true
 	@State private var _currentIcon: String? = UIApplication.shared.alternateIconName
 	
 	// MARK: Fetch
@@ -74,6 +75,9 @@ struct SettingsView: View {
 				}
                 
 				NBSection(.localized("Features")) {
+					Toggle(isOn: $_showURLImportAction) {
+						Label("Show URL Import in + Menu", systemImage: "link")
+					}
 					NavigationLink(destination: ConfigurationView()) {
 						Label(.localized("Signing Options"), systemImage: "signature")
 					}
