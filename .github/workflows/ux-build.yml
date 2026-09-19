@@ -12,25 +12,21 @@ concurrency:
 
 jobs:
   build-ios:
-    runs-on: macos-latest
+    runs-on: macos-15
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: 'true'
 
-      - name: Show Xcode
+      - name: Select stable Xcode
         run: |
-          xcode-select -p
+          sudo xcode-select -s /Applications/Xcode_16.4.app
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
       - name: Build iOS IPA
-        run: |
-          if ! make iphoneos; then
-            echo "Initial xcodebuild failed; retrying with the resolved package cache..."
-            make iphoneos
-          fi
+        run: make iphoneos
 
       - name: Upload Feather IPA
         uses: actions/upload-artifact@v4
