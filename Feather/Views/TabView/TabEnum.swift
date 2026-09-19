@@ -9,25 +9,28 @@ import SwiftUI
 import NimbleViews
 
 enum TabEnum: String, CaseIterable, Hashable {
+	case imported
+	case signed
 	case sources
-	case library
 	case settings
 	case certificates
 	
 	var title: String {
 		switch self {
-		case .sources:     	return .localized("Sources")
-		case .library: 		return .localized("Library")
-		case .settings: 	return .localized("Settings")
-		case .certificates:	return .localized("Certificates")
+		case .imported:     return .localized("Imported")
+		case .signed:       return .localized("Signed")
+		case .sources:      return .localized("Sources")
+		case .settings:     return .localized("Settings")
+		case .certificates: return .localized("Certificates")
 		}
 	}
 	
 	var icon: String {
 		switch self {
-		case .sources: 		return "globe.desk"
-		case .library: 		return "square.grid.2x2"
-		case .settings: 	return "gearshape.2"
+		case .imported:     return "tray.and.arrow.down"
+		case .signed:       return "checkmark.seal"
+		case .sources:      return "globe.desk"
+		case .settings:     return "gearshape.2"
 		case .certificates: return "person.text.rectangle"
 		}
 	}
@@ -35,8 +38,9 @@ enum TabEnum: String, CaseIterable, Hashable {
 	@ViewBuilder
 	static func view(for tab: TabEnum) -> some View {
 		switch tab {
+		case .imported: LibraryView(mode: .imported)
+		case .signed: LibraryView(mode: .signed)
 		case .sources: SourcesView()
-		case .library: LibraryView()
 		case .settings: SettingsView()
 		case .certificates: NBNavigationView(.localized("Certificates")) { CertificatesView() }
 		}
@@ -44,8 +48,9 @@ enum TabEnum: String, CaseIterable, Hashable {
 	
 	static var defaultTabs: [TabEnum] {
 		return [
+			.imported,
+			.signed,
 			.sources,
-			.library,
 			.settings
 		]
 	}
