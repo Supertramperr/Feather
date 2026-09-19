@@ -26,7 +26,11 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-version
 
       - name: Build iOS IPA
-        run: make iphoneos
+        run: |
+          if ! make iphoneos; then
+            echo "Initial xcodebuild failed; retrying with the resolved package cache..."
+            make iphoneos
+          fi
 
       - name: Upload Feather IPA
         uses: actions/upload-artifact@v4
