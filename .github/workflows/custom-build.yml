@@ -16,13 +16,35 @@ jobs:
           submodules: 'true'
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_26.3.0.app
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.0.app
+          xcodebuild -version
+
+      - name: Prepare dependencies
+        run: make deps
 
       - name: Build iOS IPA
         run: |
           set -o pipefail
-          echo "Building Feather for iOS..."
-          make iphoneos
+          rm -rf _build
+          xcodebuild \
+            -workspace Feather.xcworkspace \
+            -scheme Feather \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$RUNNER_TEMP/Feather/iphoneos" \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=NO
+
+          mkdir -p _build/Payload
+          cp -R _build/Applications/*.app _build/Payload/Feather.app
+          chmod -R 0755 _build/Payload/Feather.app
+          codesign --force --sign - --timestamp=none _build/Payload/Feather.app
+          cp deps/* _build/Payload/Feather.app/ || true
+
+          mkdir -p packages
+          ditto -c -k --sequesterRsrc --keepParent _build/Payload packages/Feather.ipa
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
