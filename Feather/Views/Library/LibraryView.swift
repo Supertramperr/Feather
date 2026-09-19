@@ -11,7 +11,7 @@ import NimbleViews
 
 // MARK: - View
 struct LibraryView: View {
-	enum Mode {
+	enum Mode: Equatable {
 		case imported
 		case signed
 		
